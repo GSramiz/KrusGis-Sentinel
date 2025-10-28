@@ -3,7 +3,10 @@ import json
 import os
 import traceback
 from flask import Flask, render_template, request, jsonify
-from oauth2client.service_account import ServiceAccountCredentials
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения (для локальной разработки)
+load_dotenv()
 
 # Инициализация Flask
 app = Flask(__name__)
@@ -12,20 +15,33 @@ app = Flask(__name__)
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
 def initialize_earth_engine():
-    """Инициализация Earth Engine"""
+    """Инициализация Earth Engine с использованием GitHub Secrets"""
     try:
         print("\n🔄 Инициализация Earth Engine...")
         
-        service_account_info = json.loads(os.environ["GEE_CREDENTIALS"])
+        # Получаем credentials из переменных окружения (GitHub Secrets)
+        gee_credentials = os.environ.get("GEE_CREDENTIALS")
         
+        if not gee_credentials:
+            raise ValueError("GEE_CREDENTIALS не найдены в переменных окружения")
+        
+        # Парсим JSON credentials
+        service_account_info = json.loads(gee_credentials)
+        
+        # Создаем credentials для Earth Engine
         credentials = ee.ServiceAccountCredentials(
             service_account_info["client_email"],
             key_data=json.dumps(service_account_info)
         )
+        
+        # Инициализируем Earth Engine
         ee.Initialize(credentials)
         print("✅ Earth Engine инициализирован")
         return True
         
+    except json.JSONDecodeError as e:
+        print(f"❌ Ошибка парсинга GEE_CREDENTIALS: {str(e)}")
+        return False
     except Exception as e:
         print(f"❌ Ошибка инициализации Earth Engine: {str(e)}")
         return False
@@ -91,6 +107,7 @@ def get_sentinel_image():
         
     except Exception as e:
         print(f"❌ Ошибка: {str(e)}")
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
@@ -105,15 +122,22 @@ def get_regions():
         regions = fc.aggregate_array('title').getInfo()
         return jsonify({'regions': regions})
     except Exception as e:
+        print(f"❌ Ошибка получения регионов: {str(e)}")
         return jsonify({'regions': []})
+
+@app.route('/health')
+def health_check():
+    """Простой health check для мониторинга"""
+    return jsonify({'status': 'healthy', 'gee_initialized': ee.data._initialized})
 
 if __name__ == "__main__":
     # Инициализируем Earth Engine при запуске
     if initialize_earth_engine():
+        print("🚀 Запуск Flask приложения...")
         app.run(
             host='0.0.0.0', 
-            port=5000, 
+            port=int(os.environ.get("PORT", 5000)), 
             debug=DEBUG
         )
     else:
-        print("❌ Не удалось запустить приложение")
+        print("❌ Не удалось запустить приложение - ошибка инициализации Earth Engine")
