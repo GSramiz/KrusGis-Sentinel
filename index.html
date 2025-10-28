@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KrusGis Sentinel Browser</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 14px;
+            color: #333;
+            overflow: hidden;
+        }
+
+        #app-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Сайдбар с контролами */
+        #control-panel {
+            width: 320px;
+            background: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .control-section {
+            background: white;
+            border-radius: 6px;
+            padding: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .control-section h3 {
+            margin-bottom: 12px;
+            color: #495057;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        input[type="date"], input[type="range"], select {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        input[type="range"] {
+            padding: 0;
+        }
+
+        .range-value {
+            display: inline-block;
+            width: 30px;
+            text-align: right;
+            font-weight: 600;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+
+        button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #218838;
+        }
+
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        /* Область карты */
+        #map-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #28a745;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Стили для Leaflet */
+        .leaflet-top.leaflet-right .leaflet-control {
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <!-- Панель управления (слева) -->
+        <div id="control-panel">
+            <div class="control-section">
+                <h3>📅 Временной период</h3>
+                <div class="form-group">
+                    <label for="start-date">С:</label>
+                    <input type="date" id="start-date">
+                </div>
+                <div class="form-group">
+                    <label for="end-date">По:</label>
+                    <input type="date" id="end-date">
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>☁️ Фильтр облачности</h3>
+                <div class="form-group">
+                    <label>Максимум: <span id="cloud-value" class="range-value">30</span>%</label>
+                    <input type="range" id="cloud-filter" min="0" max="100" value="30">
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>🎨 Спектральные каналы</h3>
+                <div class="form-group">
+                    <label for="layer-select">Режим отображения:</label>
+                    <select id="layer-select">
+                        <option value="TRUE_COLOR">Настоящие цвета (RGB)</option>
+                        <option value="FALSE_COLOR">Ложные цвета</option>
+                        <option value="NDVI">NDVI (Растительность)</option>
+                        <option value="NDWI">NDWI (Вода)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <h3>⚙️ Обработка</h3>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="smoothing" checked>
+                    <label for="smoothing">Сглаживание (маскировка облаков)</label>
+                </div>
+            </div>
+
+            <button id="update-image">🔄 Обновить снимок</button>
+        </div>
+
+        <!-- Карта (основная область) -->
+        <div id="map-container">
+            <div id="map"></div>
+            <div class="loading-overlay" id="loading-overlay">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Инициализация карты
+        const map = L.map('map').setView([55.7558, 37.6173], 6); // Центр на Россию
+
+        // Добавляем базовый слой
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Слой для спутниковых снимков
+        let satelliteLayer = null;
+
+        // Элементы управления
+        const startDateEl = document.getElementById('start-date');
+        const endDateEl = document.getElementById('end-date');
+        const cloudFilterEl = document.getElementById('cloud-filter');
+        const cloudValueEl = document.getElementById('cloud-value');
+        const layerSelectEl = document.getElementById('layer-select');
+        const smoothingEl = document.getElementById('smoothing');
+        const updateButtonEl = document.getElementById('update-image');
+        const loadingOverlayEl = document.getElementById('loading-overlay');
+
+        // Устанавливаем даты по умолчанию (последние 30 дней)
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - 30);
+
+        startDateEl.valueAsDate = startDate;
+        endDateEl.valueAsDate = endDate;
+
+        // Обновление значения облачности
+        cloudFilterEl.addEventListener('input', function() {
+            cloudValueEl.textContent = this.value;
+        });
+
+        // Функция показа/скрытия загрузки
+        function setLoading(loading) {
+            loadingOverlayEl.style.display = loading ? 'flex' : 'none';
+            updateButtonEl.disabled = loading;
+        }
+
+        // Основная функция обновления снимка
+        async function updateSatelliteImage() {
+            try {
+                setLoading(true);
+
+                const bounds = map.getBounds();
+                const requestData = {
+                    bounds: [
+                        bounds.getSouthWest().lng,
+                        bounds.getSouthWest().lat,
+                        bounds.getNorthEast().lng,
+                        bounds.getNorthEast().lat
+                    ],
+                    start_date: startDateEl.value,
+                    end_date: endDateEl.value,
+                    cloud_filter: parseInt(cloudFilterEl.value),
+                    smoothing: smoothingEl.checked,
+                    layer: layerSelectEl.value
+                };
+
+                // Вызов твоего Flask API
+                const response = await fetch('/api/get_sentinel_image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Удаляем старый слой если есть
+                    if (satelliteLayer) {
+                        map.removeLayer(satelliteLayer);
+                    }
+
+                    // Добавляем новый слой с тайлами
+                    satelliteLayer = L.tileLayer(result.tile_url, {
+                        attribution: '© Sentinel-2, Google Earth Engine'
+                    }).addTo(map);
+
+                    console.log(`✅ Загружено снимков: ${result.image_count}`);
+                } else {
+                    alert('Ошибка: ' + result.error);
+                }
+
+            } catch (error) {
+                console.error('❌ Ошибка:', error);
+                alert('Произошла ошибка при загрузке снимка');
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        // Обработчик кнопки
+        updateButtonEl.addEventListener('click', updateSatelliteImage);
+
+        // Автоматическая загрузка при открытии
+        setTimeout(updateSatelliteImage, 1000);
+    </script>
+</body>
+</html>
