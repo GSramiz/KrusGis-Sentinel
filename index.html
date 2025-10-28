@@ -7,6 +7,7 @@
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
+        /* Твой существующий CSS остается без изменений */
         * {
             margin: 0;
             padding: 0;
@@ -155,6 +156,16 @@
             margin-right: 10px;
             margin-top: 10px;
         }
+
+        /* Добавляем стиль для информации о снимке */
+        .image-info {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin: 10px;
+            font-size: 12px;
+            border: 1px solid #ccc;
+        }
     </style>
 </head>
 <body>
@@ -203,6 +214,12 @@
             </div>
 
             <button id="update-image">🔄 Обновить снимок</button>
+            
+            <!-- Добавляем блок информации -->
+            <div class="control-section" id="info-section" style="display: none;">
+                <h3>📊 Информация</h3>
+                <div id="image-info"></div>
+            </div>
         </div>
 
         <!-- Карта (основная область) -->
@@ -217,6 +234,12 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        // КОНФИГУРАЦИЯ - БАЗОВЫЙ URL API
+        // Для локальной разработки:
+        const API_BASE_URL = 'http://localhost:5000';
+        // Для продакшена (замени на URL твоего PythonAnywhere):
+        // const API_BASE_URL = 'https://твой-логин.pythonanywhere.com';
+
         // Инициализация карты
         const map = L.map('map').setView([55.7558, 37.6173], 6); // Центр на Россию
 
@@ -237,14 +260,21 @@
         const smoothingEl = document.getElementById('smoothing');
         const updateButtonEl = document.getElementById('update-image');
         const loadingOverlayEl = document.getElementById('loading-overlay');
+        const infoSectionEl = document.getElementById('info-section');
+        const imageInfoEl = document.getElementById('image-info');
 
         // Устанавливаем даты по умолчанию (последние 30 дней)
         const endDate = new Date();
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - 30);
 
-        startDateEl.valueAsDate = startDate;
-        endDateEl.valueAsDate = endDate;
+        // Форматируем даты для input[type="date"]
+        function formatDate(date) {
+            return date.toISOString().split('T')[0];
+        }
+
+        startDateEl.value = formatDate(startDate);
+        endDateEl.value = formatDate(endDate);
 
         // Обновление значения облачности
         cloudFilterEl.addEventListener('input', function() {
@@ -255,6 +285,20 @@
         function setLoading(loading) {
             loadingOverlayEl.style.display = loading ? 'flex' : 'none';
             updateButtonEl.disabled = loading;
+        }
+
+        // Функция обновления информации о снимке
+        function updateImageInfo(result) {
+            if (result.success && result.layer_info) {
+                imageInfoEl.innerHTML = `
+                    <strong>Слой:</strong> ${result.layer_info.description}<br>
+                    <strong>Снимков найдено:</strong> ${result.image_count}<br>
+                    <strong>Статус:</strong> ✅ Успешно загружено
+                `;
+                infoSectionEl.style.display = 'block';
+            } else {
+                infoSectionEl.style.display = 'none';
+            }
         }
 
         // Основная функция обновления снимка
@@ -277,8 +321,10 @@
                     layer: layerSelectEl.value
                 };
 
-                // Вызов твоего Flask API
-                const response = await fetch('/api/get_sentinel_image', {
+                console.log('📤 Отправка запроса:', requestData);
+
+                // Вызов твоего Flask API с базовым URL
+                const response = await fetch(`${API_BASE_URL}/api/get_sentinel_image`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -286,7 +332,12 @@
                     body: JSON.stringify(requestData)
                 });
 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
                 const result = await response.json();
+                console.log('📥 Получен ответ:', result);
 
                 if (result.success) {
                     // Удаляем старый слой если есть
@@ -296,17 +347,23 @@
 
                     // Добавляем новый слой с тайлами
                     satelliteLayer = L.tileLayer(result.tile_url, {
-                        attribution: '© Sentinel-2, Google Earth Engine'
+                        attribution: '© Sentinel-2, Google Earth Engine',
+                        maxZoom: 18
                     }).addTo(map);
 
+                    // Обновляем информацию
+                    updateImageInfo(result);
+                    
                     console.log(`✅ Загружено снимков: ${result.image_count}`);
                 } else {
                     alert('Ошибка: ' + result.error);
+                    infoSectionEl.style.display = 'none';
                 }
 
             } catch (error) {
                 console.error('❌ Ошибка:', error);
-                alert('Произошла ошибка при загрузке снимка');
+                alert('Произошла ошибка при загрузке снимка: ' + error.message);
+                infoSectionEl.style.display = 'none';
             } finally {
                 setLoading(false);
             }
@@ -315,8 +372,8 @@
         // Обработчик кнопки
         updateButtonEl.addEventListener('click', updateSatelliteImage);
 
-        // Автоматическая загрузка при открытии
-        setTimeout(updateSatelliteImage, 1000);
+        // Автоматическая загрузка при открытии (через 2 секунды)
+        setTimeout(updateSatelliteImage, 2000);
     </script>
 </body>
 </html>
